@@ -21,9 +21,9 @@ const App: React.FC = () => {
         try {
             const response = await fetch('/api/start', { method: 'POST' });
             if (!response.ok) {
-                throw new Error('Failed to start agents from backend.');
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to start agents from backend.');
             }
-            // The UI will update on the next successful poll from useAgentData
             alert('Start command sent successfully! Agents are now active.');
         } catch (err) {
             console.error('Error starting agents:', err);
@@ -31,6 +31,46 @@ const App: React.FC = () => {
                 alert(`Error: ${err.message}`);
             } else {
                 alert('An unknown error occurred while trying to start the agents.');
+            }
+        }
+    };
+
+    const handleRunConnectionTest = async () => {
+        try {
+            alert('Running connection test for Agent P1... Please wait.');
+            const response = await fetch('/api/debug/bybit-check');
+            const result = await response.json();
+            
+            let alertMessage = `--- Bybit Connection Test Result ---\n\n`;
+            alertMessage += `Bybit Server Response: "${result.retMsg}" (Code: ${result.retCode})\n\n`;
+
+            if (result.retCode === 0) {
+                alertMessage += "✅ SUCCESS! The connection is working correctly and your balance was fetched.\n\n";
+                const usdt = result.result?.list?.[0]?.coin?.find((c: any) => c.coin === 'USDT');
+                if (usdt) {
+                    alertMessage += `Your USDT Wallet Balance: ${usdt.walletBalance}`;
+                } else {
+                    alertMessage += `Your account is connected but no USDT balance was found.`;
+                }
+            } else {
+                alertMessage += `❌ FAILED. The Bybit server is rejecting your API key.\n\n`;
+                alertMessage += `This confirms the problem is with the key or account settings on the Bybit website, not the application code.\n\n`;
+                alertMessage += `--- PLEASE CHECK THE FOLLOWING IN YOUR BYBIT ACCOUNT ---\n`;
+                alertMessage += `1. Account Type: Ensure you are using a Unified Trading Account (UTA).\n`;
+                alertMessage += `2. API Key Permissions: The key MUST have "Read-Write" access enabled for "Contract" AND "Wallet".\n`;
+                alertMessage += `3. IP Whitelisting: Ensure your API key is NOT restricted to specific IP addresses.\n`;
+                alertMessage += `4. Key Status: Make sure the API key is active and has not expired.\n\n`;
+                alertMessage += `Create a new key with the correct settings if the error persists.`;
+            }
+
+            alert(alertMessage);
+
+        } catch (err) {
+            console.error('Error running connection test:', err);
+             if (err instanceof Error) {
+                alert(`Test Failed: ${err.message}`);
+            } else {
+                alert('An unknown error occurred during the test.');
             }
         }
     };
@@ -76,6 +116,12 @@ const App: React.FC = () => {
                     <div className="text-sm text-gray-400 text-right">
                         Last update: {new Date().toLocaleTimeString()}
                     </div>
+                     <button
+                        onClick={handleRunConnectionTest}
+                        className="bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-yellow-700 transition duration-300"
+                    >
+                        Run Connection Test
+                    </button>
                      <button
                         onClick={handleStartTrading}
                         disabled={hasStarted}

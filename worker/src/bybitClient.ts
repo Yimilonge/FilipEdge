@@ -64,7 +64,7 @@ export class BybitClient {
                     return null; // Found account but no USDT balance
                 } else {
                    // Let the outer catch block handle this as a failure
-                   throw new Error(`Bybit API error (${accountType}): [${data.retCode}] ${data.retMsg}`);
+                   throw new Error(`Bybit API error on ${accountType} account: [${data.retCode}] ${data.retMsg}`);
                 }
     
             } catch (error) {
@@ -79,7 +79,7 @@ export class BybitClient {
             if (unifiedBalance !== null) return unifiedBalance;
         } catch (error) {
              const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-             log(this.agentId, `Note: Could not fetch UNIFIED account balance. Error: ${errorMessage}. Will try CONTRACT account next.`);
+             log(this.agentId, `Note: Could not fetch UNIFIED account balance. Msg: ${errorMessage.replace(/.*error:/, '').trim()}. Will try CONTRACT account next.`);
         }
     
         // --- Attempt 2: CONTRACT Account (Fallback) ---
@@ -89,12 +89,49 @@ export class BybitClient {
         } catch (error) {
             // This is the final attempt, so if it fails, we throw the error to be caught by the agent
             const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-            log(this.agentId, `FATAL: Failed to fetch wallet balance for CONTRACT account: ${errorMessage}`);
+            log(this.agentId, `FATAL: Failed to fetch wallet balance after trying all account types: ${errorMessage}`);
             throw error;
         }
         
         throw new Error("USDT balance not found for either UNIFIED or CONTRACT account types after manual fetch.");
     }
+    
+    async debugGetWalletBalance(): Promise<any> {
+        const accountType = 'UNIFIED'; // Start with unified for the test
+        const host = 'https://api.bybit.com';
+        const path = '/v5/account/wallet-balance';
+        const timestamp = Date.now().toString();
+        const recvWindow = '10000';
+        const params = `accountType=${accountType}`;
+        const signaturePayload = timestamp + this.apiKey + recvWindow + params;
+
+        const signature = crypto
+            .createHmac('sha256', this.apiSecret)
+            .update(signaturePayload)
+            .digest('hex');
+
+        const url = `${host}${path}?${params}`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'X-BAPI-API-KEY': this.apiKey,
+                    'X-BAPI-TIMESTAMP': timestamp,
+                    'X-BAPI-RECV-WINDOW': recvWindow,
+                    'X-BAPI-SIGN': signature,
+                    'Content-Type': 'application/json'
+                }
+            });
+            return await response.json(); // Return raw JSON
+        } catch (error) {
+            return {
+                error: 'Fetch request failed.',
+                message: error instanceof Error ? error.message : 'Unknown error',
+            };
+        }
+    }
+
 
     async getMarketData(): Promise<string> {
         log(this.agentId, "Fetching market data from Bybit...");

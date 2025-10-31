@@ -6,6 +6,7 @@ import { strategies } from './strategies.config';
 import { getLogs, log } from './logger';
 import { getTodaysTradesAsCsv } from './tradeLogger';
 import { Position } from './types';
+import { BybitClient } from './bybitClient';
 
 dotenv.config();
 
@@ -111,6 +112,33 @@ app.post('/start', (req, res) => {
     });
 
     res.status(200).json({ message: "Agents are starting their trading cycles." });
+});
+
+// --- DEBUGGING ENDPOINT ---
+app.get('/debug/bybit-check', async (req, res) => {
+    log('SYSTEM', 'Running Bybit connection test for agent P1 with hardcoded keys...');
+    
+    // --- TEMPORARY HARDCODED KEYS FOR DEBUGGING ---
+    // This is the final test to prove the issue is with the keys/account, not the code's configuration loading.
+    const apiKey = "e7TD5z3uWko2uSoqco";
+    const apiSecret = "SkEzZVgUsbEjTrEneG0Q74iCU9iFK2yd7k0A";
+
+    if (!apiKey || !apiSecret) {
+        const message = 'Hardcoded P1 credentials for debug endpoint are missing.';
+        log('SYSTEM', `Connection test failed: ${message}`);
+        return res.status(500).json({ error: message });
+    }
+
+    try {
+        const debugClient = new BybitClient('P1_DEBUG', apiKey, apiSecret);
+        const bybitResponse = await debugClient.debugGetWalletBalance();
+        log('SYSTEM', `Connection test complete. Bybit response: ${JSON.stringify(bybitResponse)}`);
+        res.status(200).json(bybitResponse);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'An unknown error occurred';
+        log('SYSTEM', `Connection test failed with an unexpected error: ${message}`);
+        res.status(500).json({ error: 'An unexpected error occurred during the test.', details: message });
+    }
 });
 
 
