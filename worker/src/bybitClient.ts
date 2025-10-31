@@ -42,6 +42,21 @@ export class BybitClient {
         }
     }
     
+    async getTicker(symbol: string) {
+        log(this.agentId, `Fetching ticker for ${symbol}...`);
+        try {
+            const response = await this.client.getTickers({ category: 'linear', symbol });
+            if (response.retCode !== 0 || !response.result.list.length) {
+                throw new Error(`Failed to get ticker info for ${symbol}: ${response.retMsg}`);
+            }
+            return response.result.list[0];
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+            log(this.agentId, `Error fetching ticker info: ${errorMessage}`);
+            throw error;
+        }
+    }
+
     async getInstrumentInfo(symbol: string) {
         log(this.agentId, `Fetching instrument info for ${symbol}...`);
         try {

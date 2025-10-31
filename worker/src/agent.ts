@@ -114,7 +114,8 @@ export class Agent {
             await this.tradingClient.setLeverage(decision.symbol, '10');
 
             const instrument = await this.tradingClient.getInstrumentInfo(decision.symbol);
-            const price = parseFloat(instrument.lastPrice);
+            const ticker = await this.tradingClient.getTicker(decision.symbol);
+            const price = parseFloat(ticker.lastPrice);
             const minOrderSize = parseFloat(instrument.lotSizeFilter.minOrderQty);
             const qtyStep = parseFloat(instrument.lotSizeFilter.qtyStep);
             const tickSize = parseFloat(instrument.priceFilter.tickSize);
