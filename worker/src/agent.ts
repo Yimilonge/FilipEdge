@@ -1,44 +1,75 @@
 
-import { V5Client } from 'bybit-api';
-import { AgentState, Strategy, OrderSide, Position } from './types';
-import { getTradingDecision } from './gemini';
+import { AgentState, Strategy, StrategyType, Position, OrderSide, Agent as AgentInfo } from './types';
+import { getTradeDecision, TradeDecision } from './gemini';
 import { log } from './logger';
 
-const TRADE_INTERVAL_HOURS = 3.5;
-const LEVERAGE = "10";
-const POSITION_VALUE_USD = 10; // $10 margin * 10x leverage = $100 position
+// This is a mock trading client. In a real app, this would be a client for an exchange like Bybit.
+class MockTradingClient {
+    constructor(private agentId: string, private apiKey: string, private apiSecret: string) {}
 
-export class Agent {
-    public id: string;
-    public name: string;
-    public state: AgentState = AgentState.STOPPED;
-    public balance: number = 0;
-    public pnl: number = 0;
-    public tradesToday: number = 0;
-    public openPosition: Position | null = null;
-    
-    private bybitClient: V5Client;
-    private strategy: Strategy;
-    // Fix: Use ReturnType<typeof setInterval> to avoid NodeJS namespace error.
-    private tradeInterval: ReturnType<typeof setInterval> | null = null;
-
-    constructor(strategy: Strategy, apiKey: string, apiSecret: string) {
-        this.id = strategy.id;
-        this.name = strategy.name;
-        this.strategy = strategy;
-
-        this.bybitClient = new V5Client({
-            key: apiKey,
-            secret: apiSecret,
-            testnet: true, // Using testnet for demo trading
-            demo: true,
-        });
+    async getMarketData(): Promise<string> {
+        // In a real app, this would fetch live market data for relevant symbols.
+        const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'ADAUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT', 'MATICUSDT'];
+        log(this.agentId, "Fetching mock market data...");
+        // Returning a simple list of symbols as context for Gemini.
+        return `Available symbols for trading: ${symbols.join(', ')}.`;
     }
 
-    public getStatus() {
+    async placeOrder(symbol: string, side: OrderSide, size: number): Promise<Position> {
+        // Mock placing an order.
+        log(this.agentId, `Placing MOCK ${side} order for ${size} ${symbol}`);
+        const entryPrice = 3000 + Math.random() * 500; // Mock entry price
         return {
-            id: this.id,
-            name: this.name,
+            symbol,
+            side,
+            entryPrice,
+            size,
+            unrealizedPnl: 0,
+            agentId: this.agentId,
+        };
+    }
+
+    async closePosition(position: Position): Promise<{ pnl: number }> {
+        // Mock closing a position.
+        log(this.agentId, `Closing MOCK position for ${position.symbol}`);
+        // Simulate some PnL
+        const pnl = (Math.random() - 0.45) * position.size * 100;
+        return { pnl };
+    }
+    
+    async updatePnl(position: Position): Promise<number> {
+        // Mock updating PnL for an open position
+        const pnlChange = (Math.random() - 0.5) * 5;
+        position.unrealizedPnl += pnlChange;
+        return position.unrealizedPnl;
+    }
+}
+
+
+export class Agent {
+    private strategy: Strategy;
+    private state: AgentState;
+    private balance: number;
+    private pnl: number;
+    private tradesToday: number;
+    public openPosition: Position | null;
+    private tradingClient: MockTradingClient;
+    private timeoutId: NodeJS.Timeout | null = null;
+
+    constructor(strategy: Strategy, apiKey: string, apiSecret: string) {
+        this.strategy = strategy;
+        this.state = AgentState.STOPPED;
+        this.balance = 10000; // Starting balance
+        this.pnl = 0;
+        this.tradesToday = 0;
+        this.openPosition = null;
+        this.tradingClient = new MockTradingClient(this.strategy.id, apiKey, apiSecret);
+    }
+
+    public getStatus(): AgentInfo {
+        return {
+            id: this.strategy.id,
+            name: this.strategy.name,
             type: this.strategy.type,
             state: this.state,
             balance: this.balance,
@@ -47,161 +78,145 @@ export class Agent {
         };
     }
 
-    public async start() {
-        log(this.id, 'Agent starting...');
-        await this.updateAccountState();
-        this.scheduleNextTrade();
-        this.state = AgentState.COOLDOWN; // Start in cooldown until first trade
-    }
-
-    private scheduleNextTrade() {
-        const intervalMs = TRADE_INTERVAL_HOURS * 60 * 60 * 1000;
-        if (this.tradeInterval) {
-            clearInterval(this.tradeInterval);
-        }
-        this.tradeInterval = setInterval(() => this.runTradingCycle(), intervalMs);
-        log(this.id, `Next trade scheduled in ${TRADE_INTERVAL_HOURS} hours.`);
-        // For immediate execution on start
-        this.runTradingCycle(); 
-    }
-    
-    private async updateAccountState() {
-        try {
-            // Update balance
-            const wallet = await this.bybitClient.getWalletBalance({ accountType: 'UNIFIED' });
-            this.balance = parseFloat(wallet.result.list[0].totalEquity);
-
-            // Update open position and PnL
-            const positions = await this.bybitClient.getPositionInfo({ category: 'linear', settleCoin: 'USDT' });
-            const openPositions = positions.result.list.filter(p => parseFloat(p.size) > 0);
-
-            if (openPositions.length > 0) {
-                const pos = openPositions[0];
-                this.state = AgentState.HOLDING;
-                this.openPosition = {
-                    agentId: this.id,
-                    symbol: pos.symbol,
-                    side: pos.side === 'Buy' ? OrderSide.LONG : OrderSide.SHORT,
-                    entryPrice: parseFloat(pos.avgPrice),
-                    size: parseFloat(pos.size),
-                    unrealizedPnl: parseFloat(pos.unrealisedPnl),
-                };
-                 this.pnl = parseFloat(pos.unrealisedPnl); // Simplified PnL for demo
-            } else {
-                this.openPosition = null;
-                // If not holding, check if we were recently in a trade
-                if (this.state !== AgentState.ANALYZING && this.state !== AgentState.EXECUTING) {
-                   this.state = AgentState.COOLDOWN;
-                }
-            }
-        } catch (error) {
-            log(this.id, `Error updating account state: ${error}`);
-            this.state = AgentState.ERROR;
-        }
-    }
-
-    private async runTradingCycle() {
-        log(this.id, "Starting new trading cycle.");
-        await this.updateAccountState();
-
-        if (this.openPosition) {
-            log(this.id, `Skipping cycle, already in position for ${this.openPosition.symbol}.`);
+    public start() {
+        if (this.state !== AgentState.STOPPED) {
+            log(this.strategy.id, "Agent is already running.");
             return;
         }
-        
+        log(this.strategy.id, "Agent starting trading cycle.");
+        this.run();
+    }
+    
+    public stop() {
+        if (this.timeoutId) {
+            clearTimeout(this.timeoutId);
+            this.timeoutId = null;
+        }
+        this.state = AgentState.STOPPED;
+        log(this.strategy.id, "Agent has been stopped.");
+    }
+
+    private async run() {
         try {
-            this.state = AgentState.ANALYZING;
-            
-            // 1. Get tickers and filter
-            const tickers = await this.bybitClient.getTickers({ category: 'linear' });
-            const liquidTickers = tickers.result.list
-                .filter(t => t.symbol.endsWith('USDT') && parseFloat(t.turnover24h) > 50_000_000)
-                .sort((a, b) => parseFloat(b.turnover24h) - parseFloat(a.turnover24h));
+            switch (this.state) {
+                case AgentState.STOPPED:
+                case AgentState.COOLDOWN:
+                    this.state = AgentState.ANALYZING;
+                    log(this.strategy.id, "State changed to ANALYZING. Looking for a trade...");
+                    await this.analyze();
+                    break;
+                
+                case AgentState.ANALYZING:
+                    // This state is handled by the analyze method, which transitions to EXECUTING or COOLDOWN.
+                    // If we are here, it means analyze() was called and we wait for its completion.
+                    break;
+                
+                case AgentState.EXECUTING:
+                    // This state is handled by the execute method, which transitions to HOLDING.
+                    // This case should not be hit directly in the loop.
+                    break;
 
-            if (liquidTickers.length < 20) {
-                throw new Error("Not enough liquid tickers to analyze.");
+                case AgentState.HOLDING:
+                    log(this.strategy.id, `State is HOLDING. Monitoring position in ${this.openPosition!.symbol}.`);
+                    await this.hold();
+                    break;
+                
+                case AgentState.ERROR:
+                    log(this.strategy.id, "Agent is in ERROR state. Pausing for 1 minute before retry.");
+                    this.scheduleNextRun(60 * 1000); // Wait 1 minute
+                    this.state = AgentState.COOLDOWN; // Reset state for next run
+                    break;
             }
-            
-            const symbolsToAnalyze = liquidTickers.slice(5, 20).map(t => t.symbol);
-            log(this.id, `Analyzing ${symbolsToAnalyze.length} symbols...`);
-
-            // 2. Get decision from Gemini
-            const decision = await getTradingDecision(this.strategy.prompt, symbolsToAnalyze);
-            if (!decision) {
-                throw new Error("Failed to get a valid trading decision from AI.");
-            }
-            log(this.id, `AI decision: ${decision.side} ${decision.symbol}. Reasoning: ${decision.reasoning}`);
-
-            // 3. Execute trade
-            this.state = AgentState.EXECUTING;
-            await this.executeTrade(decision.symbol, decision.side as 'Buy' | 'Sell');
-            
-            this.tradesToday += 1;
-            await this.updateAccountState();
-
         } catch (error) {
-            log(this.id, `Trading cycle failed: ${error}`);
             this.state = AgentState.ERROR;
+            if (error instanceof Error) {
+                log(this.strategy.id, `CRITICAL ERROR in agent loop: ${error.message}`);
+            } else {
+                log(this.strategy.id, `CRITICAL UNKNOWN ERROR in agent loop.`);
+            }
+            this.scheduleNextRun(10 * 1000); // Retry after 10s on error
+        }
+    }
+
+    private async analyze() {
+        const marketContext = await this.tradingClient.getMarketData();
+        const decision = await getTradeDecision(this.strategy.prompt, marketContext);
+
+        if (decision) {
+            log(this.strategy.id, `Gemini decision: Trade ${decision.symbol} with ${decision.confidence} confidence. Reason: ${decision.reason}`);
+            if (decision.confidence !== 'low') {
+                this.state = AgentState.EXECUTING;
+                log(this.strategy.id, "State changed to EXECUTING.");
+                await this.execute(decision);
+            } else {
+                log(this.strategy.id, "Confidence is too low, not executing. Cooling down.");
+                this.state = AgentState.COOLDOWN;
+                this.scheduleNextRun(30 * 1000); // 30s cooldown
+            }
+        } else {
+            log(this.strategy.id, "No trade decision received from Gemini. Cooling down.");
+            this.state = AgentState.COOLDOWN;
+            this.scheduleNextRun(60 * 1000); // 1 minute cooldown
         }
     }
     
-    private async executeTrade(symbol: string, side: 'Buy' | 'Sell') {
+    private async execute(decision: TradeDecision) {
         try {
-            log(this.id, `Executing ${side} order for ${symbol}`);
-            // Ensure leverage is set
-            await this.bybitClient.setLeverage({ category: 'linear', symbol, buyLeverage: LEVERAGE, sellLeverage: LEVERAGE });
-            log(this.id, `Leverage set to ${LEVERAGE}x for ${symbol}.`);
-
-            // Get instrument info for order size calculation
-            const instruments = await this.bybitClient.getInstrumentsInfo({ category: 'linear', symbol });
-            const instrument = instruments.result.list[0];
-            const priceFilter = instrument.priceFilter;
-            const lotSizeFilter = instrument.lotSizeFilter;
+            // Profit-seeking agents go long, loss-seeking agents go short.
+            const side = this.strategy.type === StrategyType.PROFIT ? OrderSide.LONG : OrderSide.SHORT;
+            const size = (this.balance * 0.1) / 4000; // Mock size calculation: 10% of balance
             
-            const lastPrice = parseFloat((await this.bybitClient.getTickers({ category: 'linear', symbol })).result.list[0].lastPrice);
-
-            // Calculate order size
-            const qty = POSITION_VALUE_USD / lastPrice;
-            const stepSize = parseFloat(lotSizeFilter.qtyStep);
-            const orderQty = (Math.floor(qty / stepSize) * stepSize).toString();
-
-            if (parseFloat(orderQty) < parseFloat(lotSizeFilter.minOrderQty)) {
-                throw new Error(`Calculated order quantity ${orderQty} is below minimum ${lotSizeFilter.minOrderQty}`);
-            }
+            const position = await this.tradingClient.placeOrder(decision.symbol, side, size);
+            this.openPosition = position;
+            this.tradesToday += 1;
             
-            // Calculate TP/SL (10% price move for 100% PnL on 10x leverage)
-            const priceMove = lastPrice * 0.10;
-            const tickSize = parseFloat(priceFilter.tickSize);
-
-            const calculatePrice = (base: number, move: number, direction: number) => {
-                const rawPrice = base + move * direction;
-                return (Math.round(rawPrice / tickSize) * tickSize).toFixed(5);
-            }
-
-            const takeProfit = side === 'Buy' ? calculatePrice(lastPrice, priceMove, 1) : calculatePrice(lastPrice, priceMove, -1);
-            const stopLoss = side === 'Buy' ? calculatePrice(lastPrice, priceMove, -1) : calculatePrice(lastPrice, priceMove, 1);
-            
-            log(this.id, `Order details: Qty=${orderQty}, Price=${lastPrice}, TP=${takeProfit}, SL=${stopLoss}`);
-            
-            // Place order
-            const order = await this.bybitClient.submitOrder({
-                category: 'linear',
-                symbol,
-                side,
-                orderType: 'Market',
-                qty: orderQty,
-                takeProfit,
-                stopLoss,
-            });
-            
-            log(this.id, `Order submitted successfully. Order ID: ${order.result.orderId}`);
             this.state = AgentState.HOLDING;
-
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.retMsg || error.message;
-            log(this.id, `Order execution failed: ${errorMessage}`);
+            log(this.strategy.id, `Successfully opened ${side} position for ${size} ${decision.symbol}.`);
+            this.scheduleNextRun(5 * 1000); // Check position status every 5 seconds
+        } catch (error) {
             this.state = AgentState.ERROR;
-            throw new Error(`Order execution failed: ${errorMessage}`);
+            if (error instanceof Error) {
+                log(this.strategy.id, `Error executing trade: ${error.message}`);
+            } else {
+                log(this.strategy.id, `Unknown error executing trade.`);
+            }
+            this.scheduleNextRun(10 * 1000); // Retry after 10s on error
         }
+    }
+
+    private async hold() {
+        if (!this.openPosition) {
+            this.state = AgentState.COOLDOWN;
+            log(this.strategy.id, "No open position to hold. Cooling down.");
+            this.scheduleNextRun(15 * 1000);
+            return;
+        }
+
+        await this.tradingClient.updatePnl(this.openPosition);
+        log(this.strategy.id, `Current PnL for ${this.openPosition.symbol}: $${this.openPosition.unrealizedPnl.toFixed(2)}`);
+
+        // Mock logic to close position
+        const shouldClose = Math.random() > 0.8; // 20% chance to close on each check
+
+        if (shouldClose) {
+            log(this.strategy.id, "Decision made to close position.");
+            const result = await this.tradingClient.closePosition(this.openPosition);
+            this.pnl += result.pnl;
+            this.balance += result.pnl;
+            this.openPosition = null;
+            this.state = AgentState.COOLDOWN;
+            log(this.strategy.id, `Position closed. PnL: $${result.pnl.toFixed(2)}. New balance: $${this.balance.toFixed(2)}. Cooling down.`);
+            this.scheduleNextRun(2 * 60 * 1000); // 2 minute cooldown after trade
+        } else {
+            // Continue holding, check again in 5 seconds
+            this.scheduleNextRun(5 * 1000);
+        }
+    }
+
+    private scheduleNextRun(delay: number) {
+        if (this.timeoutId) {
+            clearTimeout(this.timeoutId);
+        }
+        this.timeoutId = setTimeout(() => this.run(), delay);
     }
 }

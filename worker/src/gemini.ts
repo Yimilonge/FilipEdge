@@ -1,71 +1,81 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type } from '@google/genai';
+import { log } from './logger';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+// Initialize the GoogleGenAI client with the API key from environment variables.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+const model = 'gemini-2.5-flash';
 
-interface TradingDecision {
+export interface TradeDecision {
     symbol: string;
-    side: 'Buy' | 'Sell';
-    reasoning: string;
+    reason: string;
+    confidence: 'high' | 'medium' | 'low';
 }
 
+// Define the JSON schema for the model's response to ensure structured output.
 const responseSchema = {
     type: Type.OBJECT,
     properties: {
         symbol: {
             type: Type.STRING,
-            description: "The cryptocurrency symbol to trade, e.g., BTCUSDT."
+            description: 'The cryptocurrency symbol to trade, e.g., BTCUSDT.'
         },
-        side: {
+        reason: {
             type: Type.STRING,
-            enum: ["Buy", "Sell"],
-            description: "The side of the trade. 'Buy' for a long position, 'Sell' for a short position."
+            description: 'A brief explanation for choosing this symbol based on the strategy.'
         },
-        reasoning: {
+        confidence: {
             type: Type.STRING,
-            description: "A brief, one-sentence explanation for the trading decision."
+            description: 'The confidence level of this decision (high, medium, or low).'
         }
     },
-    required: ["symbol", "side", "reasoning"]
+    required: ['symbol', 'reason', 'confidence']
 };
 
-
-export const getTradingDecision = async (prompt: string, symbols: string[]): Promise<TradingDecision | null> => {
+export const getTradeDecision = async (prompt: string, marketContext: string): Promise<TradeDecision | null> => {
     try {
         const fullPrompt = `
-            ${prompt}
-            
-            Your task is to select exactly one cryptocurrency from the following list and recommend a trade.
-            Provide your answer as a JSON object that strictly adheres to the provided schema.
-            Do not include any extra text or markdown formatting outside of the JSON object.
+You are an expert crypto trading analyst. Your task is to select the best cryptocurrency to trade based on the given strategy and market context.
+Provide your response in JSON format.
 
-            Available symbols:
-            ${symbols.join(', ')}
+**Strategy:**
+${prompt}
+
+**Current Market Context:**
+${marketContext}
+
+Select one symbol from the market context list that best fits the strategy.
         `;
 
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: model,
+            // The `contents` field should be a string for a single text prompt.
             contents: fullPrompt,
             config: {
-                responseMimeType: "application/json",
+                responseMimeType: 'application/json',
                 responseSchema: responseSchema,
-                temperature: 0.9, // Higher temperature for more varied/creative decisions
-            },
+                temperature: 0.5,
+            }
         });
-        
-        const jsonText = response.text.trim();
-        const decision = JSON.parse(jsonText);
-        
-        // Validate that the chosen symbol was from the provided list
-        if (!symbols.includes(decision.symbol)) {
-            console.error(`Gemini returned a symbol (${decision.symbol}) not in the provided list.`);
-            return null;
+
+        // The `.text` property directly provides the string output.
+        const text = response.text.trim();
+        // The Gemini API guarantees the response will be valid JSON when a schema is provided.
+        const decision = JSON.parse(text);
+
+        if (decision.symbol && decision.reason && decision.confidence) {
+            return decision as TradeDecision;
         }
 
-        return decision as TradingDecision;
+        log('GEMINI', `Invalid JSON structure in response: ${text}`);
+        return null;
 
     } catch (error) {
-        console.error("Error getting trading decision from Gemini:", error);
+        if (error instanceof Error) {
+            log('GEMINI_ERROR', `Error getting trade decision: ${error.message}`);
+        } else {
+            log('GEMINI_ERROR', `An unknown error occurred while getting trade decision.`);
+        }
         return null;
     }
 };
