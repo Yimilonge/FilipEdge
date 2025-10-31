@@ -16,15 +16,17 @@ export class Agent {
     public openPosition: Position | null;
     private tradingClient: BybitClient;
     private timeoutId: ReturnType<typeof setTimeout> | null = null;
+    private isInitialized: boolean;
 
     constructor(strategy: Strategy, apiKey: string, apiSecret: string) {
         this.strategy = strategy;
         this.state = AgentState.STOPPED;
-        this.balance = 10000; // Starting balance
+        this.balance = 0; // Initialized to 0, will be fetched from exchange
         this.pnl = 0;
         this.tradesToday = 0;
         this.openPosition = null;
         this.tradingClient = new BybitClient(this.strategy.id, apiKey, apiSecret);
+        this.isInitialized = false;
     }
 
     public getStatus(): AgentInfo {
@@ -38,12 +40,31 @@ export class Agent {
             tradesToday: this.tradesToday,
         };
     }
+    
+    private async initialize() {
+        if (this.isInitialized) return;
+        try {
+            log(this.strategy.id, 'Initializing agent and fetching balance...');
+            this.balance = await this.tradingClient.getWalletBalance();
+            this.isInitialized = true;
+            log(this.strategy.id, `Initialization complete. Starting balance: $${this.balance.toFixed(2)}`);
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error during initialization';
+            log(this.strategy.id, `CRITICAL: Agent initialization failed: ${errorMessage}. Agent will not start.`);
+            this.state = AgentState.ERROR;
+            // This error will be caught by the start command handler
+            throw new Error(`Agent ${this.strategy.id} failed to initialize.`);
+        }
+    }
 
-    public start() {
+    public async start() {
         if (this.state !== AgentState.STOPPED) {
             log(this.strategy.id, "Agent is already running.");
             return;
         }
+        log(this.strategy.id, "Agent starting...");
+        await this.initialize();
+        
         log(this.strategy.id, "Agent starting trading cycle.");
         this.run();
     }

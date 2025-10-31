@@ -83,7 +83,16 @@ app.post('/start', (req, res) => {
     // Stagger the start of each agent
     agents.forEach((agent, index) => {
         setTimeout(() => {
-            agent.start();
+            // Use an async IIFE to handle the async start method
+            (async () => {
+                try {
+                    await agent.start();
+                } catch (e) {
+                    // The error is already logged inside the agent.
+                    // The agent's state will be set to ERROR and be visible on the dashboard.
+                    console.error(`Agent ${agent.getStatus().id} failed to start:`, e instanceof Error ? e.message : String(e));
+                }
+            })();
         }, index * 15 * 1000); // 15 second stagger
     });
 

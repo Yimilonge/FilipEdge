@@ -16,6 +16,46 @@ export class BybitClient {
         });
     }
 
+    async getWalletBalance(): Promise<number> {
+        log(this.agentId, "Fetching wallet balance from Bybit...");
+        try {
+            // First, try with UNIFIED account type, which is the most common for derivatives
+            const response = await this.client.getWalletBalance({ accountType: 'UNIFIED' });
+            if (response.retCode !== 0 && response.retMsg !== 'Account not exists') {
+                throw new Error(`Bybit API error (UNIFIED): ${response.retMsg}`);
+            }
+            
+            if (response.result.list && response.result.list.length > 0) {
+                const usdtBalance = response.result.list[0]?.coin.find(c => c.coin === 'USDT');
+                if (usdtBalance?.walletBalance) {
+                    log(this.agentId, `Successfully fetched wallet balance (UNIFIED): ${usdtBalance.walletBalance} USDT`);
+                    return parseFloat(usdtBalance.walletBalance);
+                }
+            }
+
+            // Fallback to CONTRACT account type for non-UTA users
+            log(this.agentId, "UNIFIED account balance not found, trying CONTRACT account type...");
+            const contractResponse = await this.client.getWalletBalance({ accountType: 'CONTRACT' });
+            if (contractResponse.retCode !== 0) {
+                 throw new Error(`Bybit API error (CONTRACT): ${contractResponse.retMsg}`);
+            }
+            if (contractResponse.result.list && contractResponse.result.list.length > 0) {
+                const usdtContractBalance = contractResponse.result.list[0]?.coin.find(c => c.coin === 'USDT');
+                if (usdtContractBalance?.walletBalance) {
+                    log(this.agentId, `Successfully fetched wallet balance (CONTRACT): ${usdtContractBalance.walletBalance} USDT`);
+                    return parseFloat(usdtContractBalance.walletBalance);
+                }
+            }
+
+            throw new Error("USDT balance not found for either UNIFIED or CONTRACT account type.");
+
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+            log(this.agentId, `Failed to fetch wallet balance: ${errorMessage}`);
+            throw error;
+        }
+    }
+
     async getMarketData(): Promise<string> {
         log(this.agentId, "Fetching market data from Bybit...");
         try {
