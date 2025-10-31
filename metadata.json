@@ -1,0 +1,5 @@
+{
+  "name": "FlipEdge Agent Dashboard",
+  "description": "A web-based monitoring and control dashboard for a fleet of automated cryptocurrency trading agents. It visualizes real-time data from a backend worker that uses Google Gemini AI for trading decisions.",
+  "requestFramePermissions": []
+}
