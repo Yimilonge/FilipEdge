@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -22,28 +21,39 @@ let hasStarted = false;
 const initializeAgents = () => {
     log('SYSTEM', 'Initializing agents...');
     const initializedAgents: Agent[] = [];
-    // Creating dummy keys for demo purposes if not set.
-    // In a real environment, these should be securely set.
-    const DUMMY_KEY = "DUMMY_KEY";
-    const DUMMY_SECRET = "DUMMY_SECRET";
 
     for (const strategy of strategies) {
-        // Use environment variables if they exist, otherwise use dummies for initialization to proceed.
-        const apiKey = process.env[`BYBIT_API_KEY_${strategy.id}`] || DUMMY_KEY;
-        const apiSecret = process.env[`BYBIT_API_SECRET_${strategy.id}`] || DUMMY_SECRET;
+        const apiKey = process.env[`BYBIT_API_KEY_${strategy.id}`];
+        const apiSecret = process.env[`BYBIT_API_SECRET_${strategy.id}`];
+
+        if (!apiKey || !apiSecret) {
+            log('SYSTEM', `CRITICAL: Missing API Key or Secret for agent ${strategy.id}. This agent will not be initialized.`);
+            continue; // Skip initializing this agent
+        }
 
         initializedAgents.push(new Agent(strategy, apiKey, apiSecret));
         log('SYSTEM', `Agent ${strategy.id} (${strategy.name}) initialized.`);
     }
+    
     agents = initializedAgents;
-    log('SYSTEM', `Initialization complete. ${agents.length} agents are ready.`);
+
+    if (agents.length === 0) {
+        log('SYSTEM', 'CRITICAL: No agents were initialized. Please check your environment variables for BYBIT_API_KEY_ and BYBIT_API_SECRET_ for each agent (e.g., BYBIT_API_KEY_P1).');
+    } else {
+        log('SYSTEM', `Initialization complete. ${agents.length} out of ${strategies.length} agents are ready.`);
+    }
 };
 
 
 // API Endpoint to get status
 app.get('/status', async (req, res) => {
-    if (agents.length === 0) {
-        return res.status(503).json({ error: "Agents not initialized." });
+    if (agents.length === 0 && strategies.length > 0) {
+         return res.json({
+            agents: [],
+            openPositions: [],
+            logs: getLogs(),
+            reports: [],
+        });
     }
     
     const allPositions: Position[] = agents
@@ -74,7 +84,7 @@ app.post('/start', (req, res) => {
         return res.status(400).json({ message: "Trading has already started." });
     }
     if (agents.length === 0) {
-        return res.status(500).json({ message: "No agents are initialized to start." });
+        return res.status(500).json({ message: "No agents are initialized to start. Check server logs for configuration errors." });
     }
 
     log('SYSTEM', 'Received command to start trading for all agents.');
