@@ -1,13 +1,18 @@
 import { RestClientV5 } from 'bybit-api';
 import { log } from './logger';
 import { OrderSide } from './types';
+import crypto from 'crypto';
 
 const HIGH_VOLUME_THRESHOLD = 50000000; // 50 Million USD
 
 export class BybitClient {
     private client: RestClientV5;
+    private apiKey: string;
+    private apiSecret: string;
 
     constructor(private agentId: string, apiKey: string, apiSecret: string) {
+        this.apiKey = apiKey;
+        this.apiSecret = apiSecret;
         this.client = new RestClientV5({
             key: apiKey,
             secret: apiSecret,
@@ -17,51 +22,78 @@ export class BybitClient {
     }
 
     async getWalletBalance(): Promise<number> {
-        log(this.agentId, "Fetching wallet balance from Bybit...");
-
+        log(this.agentId, "Fetching wallet balance using manual request signing...");
+    
+        const tryFetchBalance = async (accountType: 'UNIFIED' | 'CONTRACT'): Promise<number | null> => {
+            log(this.agentId, `Attempting to fetch balance for ${accountType} account type...`);
+            
+            const host = 'https://api.bybit.com';
+            const path = '/v5/account/wallet-balance';
+            const timestamp = Date.now().toString();
+            const recvWindow = '10000';
+            const params = `accountType=${accountType}`;
+            const signaturePayload = timestamp + this.apiKey + recvWindow + params;
+    
+            const signature = crypto
+                .createHmac('sha256', this.apiSecret)
+                .update(signaturePayload)
+                .digest('hex');
+    
+            const url = `${host}${path}?${params}`;
+            
+            try {
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'X-BAPI-API-KEY': this.apiKey,
+                        'X-BAPI-TIMESTAMP': timestamp,
+                        'X-BAPI-RECV-WINDOW': recvWindow,
+                        'X-BAPI-SIGN': signature,
+                        'Content-Type': 'application/json'
+                    }
+                });
+    
+                const data = await response.json();
+    
+                if (data.retCode === 0) {
+                    const usdtBalance = data.result.list?.[0]?.coin.find((c: any) => c.coin === 'USDT');
+                    if (usdtBalance?.walletBalance) {
+                        log(this.agentId, `Successfully fetched wallet balance (${accountType}): ${usdtBalance.walletBalance} USDT`);
+                        return parseFloat(usdtBalance.walletBalance);
+                    }
+                    return null; // Found account but no USDT balance
+                } else {
+                   // Let the outer catch block handle this as a failure
+                   throw new Error(`Bybit API error (${accountType}): [${data.retCode}] ${data.retMsg}`);
+                }
+    
+            } catch (error) {
+                 // Rethrow to be handled by the main logic
+                 throw error;
+            }
+        };
+    
         // --- Attempt 1: UNIFIED Account ---
         try {
-            log(this.agentId, "Attempting to fetch balance for UNIFIED account type...");
-            const response = await this.client.getWalletBalance({ accountType: 'UNIFIED' });
-            if (response.retCode === 0 && response.result.list && response.result.list.length > 0) {
-                const usdtBalance = response.result.list[0]?.coin.find(c => c.coin === 'USDT');
-                if (usdtBalance?.walletBalance) {
-                    log(this.agentId, `Successfully fetched wallet balance (UNIFIED): ${usdtBalance.walletBalance} USDT`);
-                    return parseFloat(usdtBalance.walletBalance);
-                }
-            } else if (response.retCode !== 0) {
-                 // Log the error but don't throw, to allow fallback
-                 log(this.agentId, `Note: Could not fetch UNIFIED account balance. Msg: ${response.retMsg}. Will try CONTRACT account next.`);
-            }
+            const unifiedBalance = await tryFetchBalance('UNIFIED');
+            if (unifiedBalance !== null) return unifiedBalance;
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-            log(this.agentId, `Note: An error occurred while fetching UNIFIED balance: ${errorMessage}. Will try CONTRACT account next.`);
+             const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+             log(this.agentId, `Note: Could not fetch UNIFIED account balance. Error: ${errorMessage}. Will try CONTRACT account next.`);
         }
-        
+    
         // --- Attempt 2: CONTRACT Account (Fallback) ---
         try {
-            log(this.agentId, "Falling back to fetch balance for CONTRACT account type...");
-            const contractResponse = await this.client.getWalletBalance({ accountType: 'CONTRACT' });
-            if (contractResponse.retCode === 0 && contractResponse.result.list && contractResponse.result.list.length > 0) {
-                 const usdtContractBalance = contractResponse.result.list[0]?.coin.find(c => c.coin === 'USDT');
-                if (usdtContractBalance?.walletBalance) {
-                    log(this.agentId, `Successfully fetched wallet balance (CONTRACT): ${usdtContractBalance.walletBalance} USDT`);
-                    return parseFloat(usdtContractBalance.walletBalance);
-                }
-            } else if (contractResponse.retCode !== 0) {
-                // This is the final attempt, so if it fails, we throw a clear error.
-                throw new Error(`Bybit API error on CONTRACT account: ${contractResponse.retMsg}`);
-            }
-
-            // If we reach here, both attempts failed to find a USDT balance
-            throw new Error("USDT balance not found for either UNIFIED or CONTRACT account types.");
-
+            const contractBalance = await tryFetchBalance('CONTRACT');
+            if (contractBalance !== null) return contractBalance;
         } catch (error) {
+            // This is the final attempt, so if it fails, we throw the error to be caught by the agent
             const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-            log(this.agentId, `FATAL: Failed to fetch wallet balance after trying all account types: ${errorMessage}`);
-            // Re-throw the final error to be caught by agent initialization
+            log(this.agentId, `FATAL: Failed to fetch wallet balance for CONTRACT account: ${errorMessage}`);
             throw error;
         }
+        
+        throw new Error("USDT balance not found for either UNIFIED or CONTRACT account types after manual fetch.");
     }
 
     async getMarketData(): Promise<string> {

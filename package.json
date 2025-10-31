@@ -15,7 +15,8 @@
     "express": "^5.1.0",
     "dotenv": "^17.2.3",
     "cors": "^2.8.5",
-    "bybit-api": "^4.4.0"
+    "bybit-api": "^4.4.0",
+    "crypto": "^1.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
