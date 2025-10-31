@@ -6,7 +6,6 @@ export enum AgentState {
   HOLDING = 'HOLDING',
   COOLDOWN = 'COOLDOWN',
   ERROR = 'ERROR',
-  DISABLED = 'DISABLED',
 }
 
 export enum StrategyType {

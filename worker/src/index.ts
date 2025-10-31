@@ -1,10 +1,11 @@
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { Agent } from './agent';
 import { strategies } from './strategies.config';
 import { getLogs, log } from './logger';
-import { Position, AgentState, Agent as AgentInfo } from './types';
+import { Position } from './types';
 
 dotenv.config();
 
@@ -37,40 +38,16 @@ const initializeAgents = () => {
 
 // API Endpoint to get status
 app.get('/api/status', async (req, res) => {
-    const allPositions: Position[] = [];
-    if (agents.length > 0) {
-        try {
-            // Fetch all open positions for all initialized agents in parallel
-            const positionPromises = agents.map(a => a.getOpenPositions());
-            const positionsPerAgent = await Promise.all(positionPromises);
-            positionsPerAgent.forEach(p => allPositions.push(...p));
-        } catch (error) {
-            log('SYSTEM_ERROR', 'Failed to fetch open positions from Bybit.');
-        }
+    if (agents.length === 0) {
+        return res.status(503).json({ error: "Agents not initialized." });
     }
-
-    const agentStatuses = strategies.map(strategy => {
-        const agent = agents.find(a => a.strategy.id === strategy.id);
-        if (agent) {
-            const status = agent.getStatus();
-            // The agent is HOLDING if it has an open position
-            if (allPositions.some(p => p.agentId === status.id)) {
-                status.state = AgentState.HOLDING;
-            }
-            return status;
-        } else {
-            // Agent not initialized due to missing keys
-            return {
-                id: strategy.id,
-                name: strategy.name,
-                type: strategy.type,
-                state: AgentState.DISABLED,
-                balance: 0,
-                pnl: 0,
-                tradesToday: 0,
-            } as AgentInfo;
-        }
-    });
+    
+    // In a real scenario, you'd update agent state before sending
+    // For simplicity, we assume agent internal state is fresh enough
+    
+    const allPositions: Position[] = agents
+      .map(a => a.openPosition)
+      .filter((p): p is Position => p !== null);
 
     const reports = [
         `trades-2024-07-20.csv`,
@@ -79,7 +56,7 @@ app.get('/api/status', async (req, res) => {
     ];
 
     res.json({
-        agents: agentStatuses,
+        agents: agents.map(a => a.getStatus()),
         openPositions: allPositions,
         logs: getLogs(),
         reports,
@@ -114,8 +91,7 @@ app.listen(PORT, () => {
     if (!process.env.API_KEY) {
         console.error("FATAL: Google Gemini API_KEY is not set in .env file.");
         log('SYSTEM', "FATAL: Google Gemini API_KEY is not set.");
-        // In a real app, you might want to exit if the core AI key is missing.
-        // process.exit(1); 
+        // process.exit(1);
     }
     initializeAgents();
 });
