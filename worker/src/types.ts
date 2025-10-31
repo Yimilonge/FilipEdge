@@ -35,6 +35,7 @@ export interface Position {
   size: number;
   unrealizedPnl: number;
   agentId: string;
+  entryTimestamp: number;
 }
 
 export interface LogEntry {
@@ -56,4 +57,15 @@ export interface Strategy {
     name: string;
     type: StrategyType;
     prompt: string;
+}
+
+export interface Trade {
+    timestamp: string;
+    agentId: string;
+    symbol: string;
+    side: OrderSide;
+    size: number;
+    entryPrice: number;
+    closePrice: number;
+    pnl: number;
 }
