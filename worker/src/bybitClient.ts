@@ -1,4 +1,3 @@
-
 import { RestClientV5 } from 'bybit-api';
 import { log } from './logger';
 import { OrderSide } from './types';
@@ -12,7 +11,8 @@ export class BybitClient {
         this.client = new RestClientV5({
             key: apiKey,
             secret: apiSecret,
-            // Defaults to mainnet when 'testnet' is not specified
+            // Increase the receive window to 10 seconds to account for potential network latency
+            recv_window: 10000,
         });
     }
 

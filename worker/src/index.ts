@@ -23,13 +23,17 @@ const initializeAgents = () => {
     const initializedAgents: Agent[] = [];
 
     for (const strategy of strategies) {
-        const apiKey = process.env[`BYBIT_API_KEY_${strategy.id}`];
-        const apiSecret = process.env[`BYBIT_API_SECRET_${strategy.id}`];
+        // Trim whitespace from keys which can cause authentication errors
+        const apiKey = process.env[`BYBIT_API_KEY_${strategy.id}`]?.trim();
+        const apiSecret = process.env[`BYBIT_API_SECRET_${strategy.id}`]?.trim();
 
         if (!apiKey || !apiSecret) {
             log('SYSTEM', `CRITICAL: Missing API Key or Secret for agent ${strategy.id}. This agent will not be initialized.`);
             continue; // Skip initializing this agent
         }
+
+        // Add diagnostic logging to help verify environment variable loading
+        log('SYSTEM', `Found credentials for agent ${strategy.id}. Key length: ${apiKey.length}, Secret length: ${apiSecret.length}.`);
 
         initializedAgents.push(new Agent(strategy, apiKey, apiSecret));
         log('SYSTEM', `Agent ${strategy.id} (${strategy.name}) initialized.`);
