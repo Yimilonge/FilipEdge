@@ -21,17 +21,16 @@ const App: React.FC = () => {
         try {
             const response = await fetch('/api/start', { method: 'POST' });
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Failed to start agents from backend.');
+                throw new Error('Failed to start agents from backend.');
             }
             // The UI will update on the next successful poll from useAgentData
-            alert('Start command sent successfully! Agent is now active.');
+            alert('Start command sent successfully! Agents are now active.');
         } catch (err) {
             console.error('Error starting agents:', err);
             if (err instanceof Error) {
                 alert(`Error: ${err.message}`);
             } else {
-                alert('An unknown error occurred while trying to start the agent.');
+                alert('An unknown error occurred while trying to start the agents.');
             }
         }
     };
@@ -62,7 +61,8 @@ const App: React.FC = () => {
     if (!data) return null;
 
     const profitAgents = data.agents.filter(a => a.type === StrategyType.PROFIT);
-    const totalPnl = data.agents.reduce((sum, a) => sum + a.pnl, 0);
+    const totalPnl = profitAgents.reduce((sum, a) => sum + a.pnl, 0);
+    
     const hasStarted = data.agents.length > 0 && data.agents.some(a => a.state !== AgentState.STOPPED);
 
     return (
@@ -81,21 +81,22 @@ const App: React.FC = () => {
                         disabled={hasStarted}
                         className="bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed"
                     >
-                        {hasStarted ? 'Agent Active' : 'Start Trading'}
+                        {hasStarted ? 'Agents Active' : 'Start Trading'}
                     </button>
                 </div>
             </header>
 
             <main>
                 {/* KPIs */}
-                <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                     <KpiCard title="Total PnL (24h)" value={totalPnl} />
+                    <KpiCard title="Profit Strategies PnL" value={totalPnl} />
                 </section>
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
                     {/* Main Content: Tables */}
                     <div className="xl:col-span-2 flex flex-col gap-8">
-                        <AccountsTable title="Trading Agent" agents={profitAgents} borderColor="border-green-500" />
+                        <AccountsTable title="Profit-Seeking Agents" agents={profitAgents} borderColor="border-green-500" />
                         <PositionsTable positions={data.openPositions} agents={data.agents} />
                     </div>
 

@@ -15,38 +15,43 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-let agent: Agent | null = null;
+let agents: Agent[] = [];
 let hasStarted = false;
 
-const initializeAgent = () => {
-    log('SYSTEM', 'Initializing single agent...');
+const initializeAgents = () => {
+    log('SYSTEM', 'Initializing agents...');
+    const initializedAgents: Agent[] = [];
+
+    for (const strategy of strategies) {
+        // Trim whitespace from keys which can cause authentication errors
+        const apiKey = process.env[`BYBIT_API_KEY_${strategy.id}`]?.trim();
+        const apiSecret = process.env[`BYBIT_API_SECRET_${strategy.id}`]?.trim();
+
+        if (!apiKey || !apiSecret) {
+            log('SYSTEM', `CRITICAL: Missing API Key or Secret for agent ${strategy.id}. This agent will not be initialized.`);
+            continue; // Skip initializing this agent
+        }
+
+        // Add diagnostic logging to help verify environment variable loading
+        log('SYSTEM', `Found credentials for agent ${strategy.id}. Key length: ${apiKey.length}, Secret length: ${apiSecret.length}.`);
+
+        initializedAgents.push(new Agent(strategy, apiKey, apiSecret));
+        log('SYSTEM', `Agent ${strategy.id} (${strategy.name}) initialized.`);
+    }
     
-    // Use a single strategy, the first one from the config
-    const strategy = strategies[0];
-    if (!strategy) {
-        log('SYSTEM', 'CRITICAL: No strategy found in strategies.config.ts. Agent cannot start.');
-        return;
+    agents = initializedAgents;
+
+    if (agents.length === 0) {
+        log('SYSTEM', 'CRITICAL: No agents were initialized. Please check your environment variables for BYBIT_API_KEY_ and BYBIT_API_SECRET_ for each agent (e.g., BYBIT_API_KEY_P1).');
+    } else {
+        log('SYSTEM', `Initialization complete. ${agents.length} out of ${strategies.length} agents are ready.`);
     }
-
-    // Load static, simple environment variable names
-    const apiKey = process.env.BYBIT_API_KEY?.trim();
-    const apiSecret = process.env.BYBIT_API_SECRET?.trim();
-
-    if (!apiKey || !apiSecret) {
-        log('SYSTEM', `CRITICAL: Missing BYBIT_API_KEY or BYBIT_API_SECRET environment variables. The agent will not be initialized.`);
-        return;
-    }
-
-    log('SYSTEM', `Found credentials. Key length: ${apiKey.length}, Secret length: ${apiSecret.length}.`);
-
-    agent = new Agent(strategy, apiKey, apiSecret);
-    log('SYSTEM', `Agent ${strategy.id} (${strategy.name}) initialized successfully.`);
 };
 
 
 // API Endpoint to get status
 app.get('/status', async (req, res) => {
-    if (!agent) {
+    if (agents.length === 0 && strategies.length > 0) {
          return res.json({
             agents: [],
             openPositions: [],
@@ -55,14 +60,15 @@ app.get('/status', async (req, res) => {
         });
     }
     
-    const openPosition = agent.openPosition;
-    const allPositions: Position[] = openPosition ? [openPosition] : [];
+    const allPositions: Position[] = agents
+      .map(a => a.openPosition)
+      .filter((p): p is Position => p !== null);
 
     res.json({
-        agents: [agent.getStatus()],
+        agents: agents.map(a => a.getStatus()),
         openPositions: allPositions,
         logs: getLogs(),
-        reports: [],
+        reports: [], // Historical reports are no longer mocked
     });
 });
 
@@ -81,30 +87,38 @@ app.post('/start', (req, res) => {
     if (hasStarted) {
         return res.status(400).json({ message: "Trading has already started." });
     }
-    if (!agent) {
-        return res.status(500).json({ message: "Agent is not initialized. Check server logs for configuration errors." });
+    if (agents.length === 0) {
+        return res.status(500).json({ message: "No agents are initialized to start. Check server logs for configuration errors." });
     }
 
-    log('SYSTEM', 'Received command to start trading.');
+    log('SYSTEM', 'Received command to start trading for all agents.');
     hasStarted = true;
     
-    (async () => {
-        try {
-            await agent.start();
-        } catch (e) {
-            console.error(`Agent failed to start:`, e instanceof Error ? e.message : String(e));
-        }
-    })();
+    // Stagger the start of each agent
+    agents.forEach((agent, index) => {
+        setTimeout(() => {
+            // Use an async IIFE to handle the async start method
+            (async () => {
+                try {
+                    await agent.start();
+                } catch (e) {
+                    // The error is already logged inside the agent.
+                    // The agent's state will be set to ERROR and be visible on the dashboard.
+                    console.error(`Agent ${agent.getStatus().id} failed to start:`, e instanceof Error ? e.message : String(e));
+                }
+            })();
+        }, index * 15 * 1000); // 15 second stagger
+    });
 
-    res.status(200).json({ message: "Agent is starting its trading cycle." });
+    res.status(200).json({ message: "Agents are starting their trading cycles." });
 });
 
 
 app.listen(PORT, () => {
     console.log(`FlipEdge Worker is running on port ${PORT}`);
     if (!process.env.API_KEY) {
-        console.error("WARNING: Google Gemini API_KEY is not set. AI features will fail.");
+        console.error("WARNING: Google Gemini API_KEY is not set in .env file. AI features will fail.");
         log('SYSTEM', "WARNING: Google Gemini API_KEY is not set.");
     }
-    initializeAgent();
+    initializeAgents();
 });
