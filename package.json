@@ -10,7 +10,12 @@
   },
   "dependencies": {
     "react-dom": "^19.2.0",
-    "react": "^19.2.0"
+    "react": "^19.2.0",
+    "@google/genai": "^1.28.0",
+    "express": "^5.1.0",
+    "dotenv": "^17.2.3",
+    "cors": "^2.8.5",
+    "bybit-api": "^4.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
