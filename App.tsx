@@ -21,16 +21,17 @@ const App: React.FC = () => {
         try {
             const response = await fetch('/api/start', { method: 'POST' });
             if (!response.ok) {
-                throw new Error('Failed to start agents from backend.');
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to start agents from backend.');
             }
             // The UI will update on the next successful poll from useAgentData
-            alert('Start command sent successfully! Agents are now active.');
+            alert('Start command sent successfully! Agent is now active.');
         } catch (err) {
             console.error('Error starting agents:', err);
             if (err instanceof Error) {
                 alert(`Error: ${err.message}`);
             } else {
-                alert('An unknown error occurred while trying to start the agents.');
+                alert('An unknown error occurred while trying to start the agent.');
             }
         }
     };
@@ -61,12 +62,7 @@ const App: React.FC = () => {
     if (!data) return null;
 
     const profitAgents = data.agents.filter(a => a.type === StrategyType.PROFIT);
-    const lossAgents = data.agents.filter(a => a.type === StrategyType.LOSS);
-
-    const profitPnl = profitAgents.reduce((sum, a) => sum + a.pnl, 0);
-    const lossPnl = lossAgents.reduce((sum, a) => sum + a.pnl, 0);
-    const totalPnl = profitPnl + lossPnl;
-    
+    const totalPnl = data.agents.reduce((sum, a) => sum + a.pnl, 0);
     const hasStarted = data.agents.length > 0 && data.agents.some(a => a.state !== AgentState.STOPPED);
 
     return (
@@ -85,7 +81,7 @@ const App: React.FC = () => {
                         disabled={hasStarted}
                         className="bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed"
                     >
-                        {hasStarted ? 'Agents Active' : 'Start Trading'}
+                        {hasStarted ? 'Agent Active' : 'Start Trading'}
                     </button>
                 </div>
             </header>
@@ -94,15 +90,12 @@ const App: React.FC = () => {
                 {/* KPIs */}
                 <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <KpiCard title="Total PnL (24h)" value={totalPnl} />
-                    <KpiCard title="Profit Strategies PnL" value={profitPnl} />
-                    <KpiCard title="Loss Strategies PnL" value={lossPnl} />
                 </section>
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
                     {/* Main Content: Tables */}
                     <div className="xl:col-span-2 flex flex-col gap-8">
-                        <AccountsTable title="Profit-Seeking Agents" agents={profitAgents} borderColor="border-green-500" />
-                        <AccountsTable title="Loss-Seeking Agents" agents={lossAgents} borderColor="border-red-500" />
+                        <AccountsTable title="Trading Agent" agents={profitAgents} borderColor="border-green-500" />
                         <PositionsTable positions={data.openPositions} agents={data.agents} />
                     </div>
 
