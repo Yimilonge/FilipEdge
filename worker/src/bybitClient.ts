@@ -18,40 +18,48 @@ export class BybitClient {
 
     async getWalletBalance(): Promise<number> {
         log(this.agentId, "Fetching wallet balance from Bybit...");
+
+        // --- Attempt 1: UNIFIED Account ---
         try {
-            // First, try with UNIFIED account type, which is the most common for derivatives
+            log(this.agentId, "Attempting to fetch balance for UNIFIED account type...");
             const response = await this.client.getWalletBalance({ accountType: 'UNIFIED' });
-            if (response.retCode !== 0 && response.retMsg !== 'Account not exists') {
-                throw new Error(`Bybit API error (UNIFIED): ${response.retMsg}`);
-            }
-            
-            if (response.result.list && response.result.list.length > 0) {
+            if (response.retCode === 0 && response.result.list && response.result.list.length > 0) {
                 const usdtBalance = response.result.list[0]?.coin.find(c => c.coin === 'USDT');
                 if (usdtBalance?.walletBalance) {
                     log(this.agentId, `Successfully fetched wallet balance (UNIFIED): ${usdtBalance.walletBalance} USDT`);
                     return parseFloat(usdtBalance.walletBalance);
                 }
+            } else if (response.retCode !== 0) {
+                 // Log the error but don't throw, to allow fallback
+                 log(this.agentId, `Note: Could not fetch UNIFIED account balance. Msg: ${response.retMsg}. Will try CONTRACT account next.`);
             }
-
-            // Fallback to CONTRACT account type for non-UTA users
-            log(this.agentId, "UNIFIED account balance not found, trying CONTRACT account type...");
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+            log(this.agentId, `Note: An error occurred while fetching UNIFIED balance: ${errorMessage}. Will try CONTRACT account next.`);
+        }
+        
+        // --- Attempt 2: CONTRACT Account (Fallback) ---
+        try {
+            log(this.agentId, "Falling back to fetch balance for CONTRACT account type...");
             const contractResponse = await this.client.getWalletBalance({ accountType: 'CONTRACT' });
-            if (contractResponse.retCode !== 0) {
-                 throw new Error(`Bybit API error (CONTRACT): ${contractResponse.retMsg}`);
-            }
-            if (contractResponse.result.list && contractResponse.result.list.length > 0) {
-                const usdtContractBalance = contractResponse.result.list[0]?.coin.find(c => c.coin === 'USDT');
+            if (contractResponse.retCode === 0 && contractResponse.result.list && contractResponse.result.list.length > 0) {
+                 const usdtContractBalance = contractResponse.result.list[0]?.coin.find(c => c.coin === 'USDT');
                 if (usdtContractBalance?.walletBalance) {
                     log(this.agentId, `Successfully fetched wallet balance (CONTRACT): ${usdtContractBalance.walletBalance} USDT`);
                     return parseFloat(usdtContractBalance.walletBalance);
                 }
+            } else if (contractResponse.retCode !== 0) {
+                // This is the final attempt, so if it fails, we throw a clear error.
+                throw new Error(`Bybit API error on CONTRACT account: ${contractResponse.retMsg}`);
             }
 
-            throw new Error("USDT balance not found for either UNIFIED or CONTRACT account type.");
+            // If we reach here, both attempts failed to find a USDT balance
+            throw new Error("USDT balance not found for either UNIFIED or CONTRACT account types.");
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-            log(this.agentId, `Failed to fetch wallet balance: ${errorMessage}`);
+            log(this.agentId, `FATAL: Failed to fetch wallet balance after trying all account types: ${errorMessage}`);
+            // Re-throw the final error to be caught by agent initialization
             throw error;
         }
     }
