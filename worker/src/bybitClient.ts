@@ -12,8 +12,7 @@ export class BybitClient {
         this.client = new RestClientV5({
             key: apiKey,
             secret: apiSecret,
-            // Use the testnet for safe testing
-            testnet: true, 
+            // Defaults to mainnet when 'testnet' is not specified
         });
     }
 
