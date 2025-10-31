@@ -58,10 +58,15 @@ Select one symbol from the market context list that best fits the strategy.
             }
         });
 
-        // The `.text` property directly provides the string output.
-        const text = response.text.trim();
+        const text = response.text;
+
+        if (!text) {
+            log('GEMINI', 'Received empty text response from Gemini.');
+            return null;
+        }
+        
         // The Gemini API guarantees the response will be valid JSON when a schema is provided.
-        const decision = JSON.parse(text);
+        const decision = JSON.parse(text.trim());
 
         if (decision.symbol && decision.reason && decision.confidence) {
             return decision as TradeDecision;

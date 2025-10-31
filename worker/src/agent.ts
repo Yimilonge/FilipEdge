@@ -54,7 +54,8 @@ export class Agent {
     private tradesToday: number;
     public openPosition: Position | null;
     private tradingClient: MockTradingClient;
-    private timeoutId: NodeJS.Timeout | null = null;
+    // Fix: Use ReturnType<typeof setTimeout> to avoid NodeJS namespace issues.
+    private timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     constructor(strategy: Strategy, apiKey: string, apiSecret: string) {
         this.strategy = strategy;
