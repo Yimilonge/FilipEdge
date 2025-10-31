@@ -7,6 +7,7 @@ interface BadgeProps {
 
 const stateColors: Record<AgentState, string> = {
   [AgentState.STOPPED]: 'bg-gray-600/20 text-gray-400',
+  [AgentState.DISABLED]: 'bg-gray-800/30 text-gray-500 border border-gray-700',
   [AgentState.ANALYZING]: 'bg-blue-500/20 text-blue-300',
   [AgentState.EXECUTING]: 'bg-purple-500/20 text-purple-300',
   [AgentState.HOLDING]: 'bg-green-500/20 text-green-300',
