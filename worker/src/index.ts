@@ -37,7 +37,7 @@ const initializeAgents = () => {
 };
 
 // API Endpoint to get status
-app.get('/api/status', async (req, res) => {
+app.get('/status', async (req, res) => {
     if (agents.length === 0) {
         return res.status(503).json({ error: "Agents not initialized." });
     }
@@ -64,7 +64,7 @@ app.get('/api/status', async (req, res) => {
 });
 
 // API Endpoint to start trading
-app.post('/api/start', (req, res) => {
+app.post('/start', (req, res) => {
     if (hasStarted) {
         return res.status(400).json({ message: "Trading has already started." });
     }
